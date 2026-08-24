@@ -37,6 +37,9 @@ final class Aevum_BOGO {
 		add_filter( 'woocommerce_get_shop_coupon_data', array( __CLASS__, 'virtual_coupon' ), 10, 2 );
 		add_filter( 'woocommerce_coupon_is_valid',      array( __CLASS__, 'validate_coupon' ), 10, 2 );
 
+		// Old product URLs must not dead-end after the merge.
+		add_action( 'template_redirect', array( __CLASS__, 'redirect_retired_urls' ), 1 );
+
 		// Keep the free lines in step with the paid ones.
 		add_action( 'woocommerce_cart_loaded_from_session', array( __CLASS__, 'sync' ), 20 );
 		add_action( 'woocommerce_applied_coupon',           array( __CLASS__, 'sync' ), 20 );
@@ -216,6 +219,64 @@ final class Aevum_BOGO {
 			esc_html( wp_strip_all_tags( $label ) ),
 			wp_kses_post( $price_html )
 		);
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Redirects for the listings that were folded into another one
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * WordPress redirects a product whose own slug changed, but a listing that was
+	 * merged away and unpublished would simply 404. These send those old URLs,
+	 * and anything Google still has indexed, to the listing that replaced them.
+	 *
+	 * @return array old product slug => new product slug
+	 */
+	public static function retired_slugs() {
+		return apply_filters( 'aevum_bogo_retired_slugs', array(
+			'ghk-cu-100mg'             => 'ghk-cu',
+			'ghk-cu-50mg'              => 'ghk-cu',
+			'bacteriostatic-water-3ml' => 'bacteriostatic-water',
+		) );
+	}
+
+	public static function redirect_retired_urls() {
+		if ( is_admin() || ( ! is_404() && ! is_singular( 'product' ) ) ) {
+			return;
+		}
+
+		$map = self::retired_slugs();
+		if ( ! $map ) {
+			return;
+		}
+
+		// Whatever the permalink structure, the slug is the last path segment.
+		$path      = wp_parse_url( isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '', PHP_URL_PATH );
+		$requested = get_query_var( 'product' );
+		if ( ! $requested && $path ) {
+			$parts     = array_values( array_filter( explode( '/', $path ) ) );
+			$requested = $parts ? end( $parts ) : '';
+		}
+		$requested = sanitize_title( (string) $requested );
+
+		if ( ! isset( $map[ $requested ] ) ) {
+			return;
+		}
+
+		// Only redirect if the destination is actually there and published.
+		$target = get_page_by_path( $map[ $requested ], OBJECT, 'product' );
+		if ( ! $target || 'publish' !== $target->post_status ) {
+			return;
+		}
+
+		// A live listing on that slug takes precedence over the map.
+		$current = get_page_by_path( $requested, OBJECT, 'product' );
+		if ( $current && 'publish' === $current->post_status ) {
+			return;
+		}
+
+		wp_safe_redirect( get_permalink( $target->ID ), 301 );
+		exit;
 	}
 
 	/* ---------------------------------------------------------------------

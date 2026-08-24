@@ -56,11 +56,31 @@ function free_qty( $s, $id ) {
 	return 0;
 }
 
-$TESA = 10;   // Tesamorelin 10mg $80, eligible
-$NAD  = 11;   // NAD+ 500mg $70, NOT eligible
-$RETA_10 = 16; // $90, eligible
-$RETA_20 = 17; // $165, eligible
-$BPC_10  = 19; // $75, NOT eligible
+// Resolved by slug so the suite survives a reseed or a re-run of the migration.
+function pid( $slug, $size = '' ) {
+	$post = get_page_by_path( $slug, OBJECT, 'product' );
+	if ( ! $post ) {
+		WP_CLI::error( "no product with slug '$slug'" );
+	}
+	$product = wc_get_product( $post->ID );
+	if ( ! $size ) {
+		return $product->get_id();
+	}
+	foreach ( $product->get_children() as $child_id ) {
+		if ( wc_get_product( $child_id )->get_attribute( 'pa_size' ) === $size ) {
+			return $child_id;
+		}
+	}
+	WP_CLI::error( "no size '$size' on '$slug'" );
+}
+
+$TESA    = pid( 'tesamorelin-10mg' );        // $80, eligible
+$NAD     = pid( 'nad-500mg' );               // $70, NOT eligible
+$RETA    = pid( 'retatrutide' );
+$RETA_10 = pid( 'retatrutide', '10mg' );     // $90, eligible
+$RETA_20 = pid( 'retatrutide', '20mg' );     // $165, eligible
+$BPC     = pid( 'bpc-157-tb-500-10mg' );
+$BPC_10  = pid( 'bpc-157-tb-500-10mg', '10mg' ); // $75, NOT eligible
 
 WC()->cart->empty_cart();
 
@@ -112,8 +132,8 @@ check( 'total unchanged at 310.00', abs( $s['total'] - 310 ) < 0.01, '$' . $s['t
 
 /* 7. Variations are handled per size. */
 WC()->cart->empty_cart();
-WC()->cart->add_to_cart( 15, 1, $RETA_10 );
-WC()->cart->add_to_cart( 18, 1, $BPC_10 );
+WC()->cart->add_to_cart( $RETA, 1, $RETA_10 );
+WC()->cart->add_to_cart( $BPC, 1, $BPC_10 );
 WC()->cart->apply_coupon( 'laborday' );
 $s = show( '7. Retatrutide 10mg (in offer) + BPC 10mg (not in offer)' );
 check( 'Retatrutide 10mg gets a free unit', free_qty( $s, $RETA_10 ) === 1 );
@@ -121,7 +141,7 @@ check( 'BPC-157 gets nothing', free_qty( $s, $BPC_10 ) === 0 );
 check( 'total is 90 + 75 = 165.00', abs( $s['total'] - 165 ) < 0.01, '$' . $s['total'] );
 
 /* 8. The other size of the same variable product also qualifies. */
-WC()->cart->add_to_cart( 15, 1, $RETA_20 );
+WC()->cart->add_to_cart( $RETA, 1, $RETA_20 );
 $s = show( '8. Retatrutide 20mg added' );
 check( '20mg gets its own free unit', free_qty( $s, $RETA_20 ) === 1 );
 check( '10mg free unit still there', free_qty( $s, $RETA_10 ) === 1 );
